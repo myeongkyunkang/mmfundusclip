@@ -170,7 +170,6 @@ if __name__ == '__main__':
     parser.add_argument('--result_dir', default='')
     parser.add_argument('--image_dir', default='')
     parser.add_argument('--task', default='disease')
-    parser.add_argument('--more_keyword', action='store_true')
     parser.add_argument('--force_feat', action='store_true')
     parser.add_argument('--test_only', action='store_true')
     args = parser.parse_args()
