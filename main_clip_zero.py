@@ -59,34 +59,22 @@ def main(model_name, pretrained, image_dir, cache_dir, result_dir, args):
                   if filename.lower().endswith(('.jpg', 'jpeg', '.png', '.tif'))}
 
     ##############################
-    # 3. Cache image features
-    image_feat_dict = {}
-    if not os.path.isfile(args.feat_path):
-        print('extract image features ...')
-        _features = []
-        for key, image_path in tqdm(list(image_dict.items())):
-            image_feature = extract_image_feature(image_path, model, preprocess)
-            _features.append((key, image_feature))
-        np.savez(args.feat_path, features=np.array(_features, dtype=object))  # save features
+    # 3. Define label
+    label_list = LABEL_KEYWORD_LIST_DISEASE
 
-    # load features
-    _features = np.load(args.feat_path, allow_pickle=True)['features']
-    for key, image_feature in _features:
-        image_feat_dict[key] = image_feature
-
-    ##############################
-    # 4. Define label
-    if args.task == 'disease':
-        label_list = LABEL_KEYWORD_LIST_DISEASE
-    else:
-        raise ValueError('Invalid task', args.task)
-
+    # Expected test.csv format:
+    #   Image ID,Diagnosis
+    #   000001.png,AMD
+    #   000002.png,DR
+    #   000003.png,Healthy
     data_dict = {}
-    if args.task == 'disease':
-        data_dict = read_label_disease(image_dir, args.test_only)
+    df = pd.read_csv(os.path.join(image_dir, 'test.csv'), usecols=['Image ID', 'Diagnosis'])
+    for index, row in list(df.iterrows()):
+        image_id = os.path.splitext(row['Image ID'])[0]
+        data_dict[image_id] = disease_data_dict[row['Diagnosis']]
 
     ##############################
-    # 5. Extract text features
+    # 4. Extract text features
     print('extract text features ...')
     text = tokenizer(label_list, context_length=model.context_length)
     with torch.no_grad():
@@ -95,18 +83,16 @@ def main(model_name, pretrained, image_dir, cache_dir, result_dir, args):
         text_features = F.normalize(text_features, dim=-1).detach()
 
     ##############################
-    # 6. Main loop
+    # 5. Main loop
+    print('extract image features ...')
     y_pred, y_true, y_prob = [], [], []
-    for key in image_dict.keys():
-        image_feature = image_feat_dict[key]
-
+    for key, image_path in tqdm(list(image_dict.items())):
         # label processing
-        try:
-            label = data_dict[key]
-        except KeyError:
+        if key not in data_dict:
             continue
-        except Exception:
-            raise ValueError(f'Invalid task: {args.task}')
+        label = data_dict[key]
+
+        image_feature = extract_image_feature(image_path, model, preprocess)
 
         # Calculate similarity
         with torch.no_grad():
@@ -122,7 +108,7 @@ def main(model_name, pretrained, image_dir, cache_dir, result_dir, args):
     y_prob = np.array(y_prob)
 
     ##############################
-    # 7. Calculate accuracy
+    # 6. Calculate accuracy
     classes = list(range(len(label_list)))
     accuracy_classes = [(sum(1 for p, g in zip(y_pred, y_true) if p == g and g == c) / y_true.count(c)) if y_true.count(c) != 0 else -1 for c in classes]  # with exception handling
     acc = np.mean([a for a in accuracy_classes if a > 0])  # macro average
@@ -136,7 +122,7 @@ def main(model_name, pretrained, image_dir, cache_dir, result_dir, args):
     print(f' * Acc {acc}, Auc: {auc}, Aupr: {aupr}')
 
     ##############################
-    # 8. Save results
+    # 7. Save results
     out_dict = {'label': label_list + ['avg'], 'acc': accuracy_classes + [acc], 'auc': auc_classes + [auc], 'aupr': aupr_classes + [aupr]}
     pd.DataFrame(out_dict).to_csv(os.path.join(result_dir, f'{args.exp_name}.csv'), index=False, encoding='utf-8-sig')
 
@@ -150,60 +136,28 @@ def extract_image_feature(image_path, model, preprocess):
     return image_features[0].detach().cpu().numpy()
 
 
-def read_label_disease(image_dir, test_only):
-    data_dict = {}
-    csv_list = ['test.csv']
-    if not test_only:
-        csv_list += ['train.csv', 'val.csv']
-    for csv_filename in csv_list:
-        for index, row in list(pd.read_csv(os.path.join(image_dir, csv_filename)).iterrows()):
-            image_id = os.path.splitext(row['Image ID'])[0]
-            data_dict[image_id] = disease_data_dict[row['Diagnosis']]
-    return data_dict
-
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='')
     parser.add_argument('--model_name', default='clip')
-    parser.add_argument('--pretrained', default='./results_clip/model.pt')
+    parser.add_argument('--pretrained', default='./models/mmfundusclip/model.pt')
     parser.add_argument('--cache_dir', default='./models/clip')
-    parser.add_argument('--result_dir', default='')
+    parser.add_argument('--result_dir', default='./result')
     parser.add_argument('--image_dir', default='')
     parser.add_argument('--task', default='disease')
-    parser.add_argument('--force_feat', action='store_true')
-    parser.add_argument('--test_only', action='store_true')
     args = parser.parse_args()
 
-    if args.test_only:
-        assert args.task in ['disease']
+    if args.task != 'disease':
+        raise ValueError('Invalid task', args.task)
 
     args.device = torch.device('cuda:0')
     args.dtype = torch.float32  # torch.bfloat16
 
     # handle defaults
     if args.image_dir == '':
-        if args.task == 'disease':
-            args.image_dir = './datasets/OpenDataset/'
-        else:
-            raise ValueError('Invalid task', args.task)
-
-    # handle defaults
-    if args.result_dir == '':
-        args.result_dir = os.path.join(args.pretrained.split('/checkpoints/')[0], f'results_{args.task}')
-        print('result_dir:', args.result_dir)
-
-    # set feat path
-    feat_dir = os.path.join(args.result_dir, 'feat')
-    os.makedirs(feat_dir, exist_ok=True)
-    args.feat_path = os.path.join(feat_dir, f'{os.path.splitext(os.path.basename(args.pretrained))[0]}_{args.task}_{args.model_name}.npz')
-    if args.force_feat and os.path.isfile(args.feat_path):
-        os.remove(args.feat_path)
-        print('Removed:', args.feat_path)
+        args.image_dir = './datasets/OpenDataset/'
 
     # set exp name
     args.exp_name = args.task
-    if args.test_only:
-        args.exp_name += '_test'
     args.exp_name += '_' + os.path.splitext(os.path.basename(args.pretrained))[0]
 
     # run main
