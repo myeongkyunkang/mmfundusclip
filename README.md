@@ -48,6 +48,17 @@ print(cmd)
 os.system(cmd)
 ```
 
+## Download pre-trained model
+<table><tbody>
+<tr><td>MM-Fundus-CLIP</td>
+<td><a href="https://huggingface.co/myeongkyunkang/mmfundusclip">download</a></td></tr>
+</tbody></table>
+
+Place the checkpoint at:
+```
+./models/mmfundusclip/model.pt
+```
+
 ## Running a zero-shot classification
 ```
 python main_clip_zero.py
