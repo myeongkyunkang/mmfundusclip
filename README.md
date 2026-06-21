@@ -1,5 +1,5 @@
 # MM-Fundus-CLIP
-MM-Fundus-CLIP: Development of a Multi-Modality Fundus Foundation Model Leveraging Large Language Model and Contrastive Language-Image Pre-Training
+MM-Fundus-CLIP: Large Language Model–Derived Text Supervision from Real-World Electronic Medical Records for Contrastive Image–Text Pre-training in Multimodal Ophthalmic Imaging
 
 ## Running a pre-tuning recipe
 ```
